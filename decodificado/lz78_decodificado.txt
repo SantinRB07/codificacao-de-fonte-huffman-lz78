@@ -1,0 +1,1 @@
+Em 1948, Claude Shannon publicou um artigo que media a surpresa em bits. Antes dele, a informacao era vp^[ERR:32779]; depois dele, virou grandeza. Provou que toda mensp^em tem um limite minimo de compressao, e que abaixo dele nada sobrevive ao ruido.
