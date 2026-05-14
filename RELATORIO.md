@@ -267,13 +267,73 @@ Não há um "vencedor" claro neste experimento — ambos os esquemas se mostrara
 
 ## 12. Conclusões
 
-1. **Eficiência de compressão.** Huffman atingiu 99,12% do limite de Shannon para esta fonte, comprimindo o arquivo em 45,6% do tamanho original. LZ78 expandiu o arquivo em 52% — comportamento esperado para textos curtos, onde o overhead de 16 bits por token não é compensado pela construção lenta do dicionário.
+1. **Eficiência de compressão.** Huffman atingiu 99,12% do limite de Shannon para esta fonte, comprimindo o arquivo em 45,6% do tamanho original. LZ78 expandiu o arquivo em 52% — comportamento esperado para textos curtos, onde o overhead de 16 bits por token não é compensado pela construção lenta do dicionário. Um experimento complementar com texto longo e redundante (Seção 13) confirma essa dependência: nele, LZ78 passa a comprimir (razão 85,7%), embora Huffman continue mais eficiente (~52%).
 
 2. **Robustez a erros.** Ambos os esquemas preservaram acima de 97,9% do texto original sob a rajada de erros aplicada (Huffman 98,3%, LZ78 97,9%). A diferença é qualitativa, não quantitativa: o Huffman concentrou todo o seu dano em uma única região (4 chars contíguos), enquanto o LZ78 produziu duas regiões separadas (3 chars no ponto do erro + 2 chars depois, por envenenamento do dicionário). Em padrões de erro diferentes — bit flips dispersos, ou flips no campo de caractere do LZ78 — os resultados poderiam ser bem distintos.
 
 3. **Implicação prática.** Codificação de fonte, isoladamente, não é robusta a canal ruidoso. Sistemas reais combinam codificação de fonte com codificação de canal (Hamming, Reed-Solomon, LDPC, etc.) que adiciona redundância calibrada para detecção e correção de erros. É o princípio da separação fonte-canal de Shannon: comprimir e proteger são duas camadas independentes, cada uma com seu próprio papel.
 
-## 13. Arquivos
+## 13. Experimento complementar — texto longo e redundante
+
+O experimento principal foi conduzido sobre um texto de 241 caracteres, no qual o LZ78 expandiu o arquivo em 52%. Esse resultado é consequência direta do tamanho insuficiente para amortizar o overhead de 16 bits do campo de índice. Para avaliar o LZ78 em um regime onde o dicionário tenha espaço para crescer, repetimos a etapa de codificação sobre um texto significativamente maior e com forte redundância semântica.
+
+### 13.1 Texto-fonte
+
+O novo texto trata do princípio da separação fonte-canal de Shannon, com repetições deliberadas de termos como `codificacao de fonte`, `codificacao de canal`, `teoria da informacao`, `Claude Shannon`, `redundancia`, `ruido`, `canal`, `mensagem`.
+
+| Métrica | Valor |
+|---|---|
+| Caracteres | 3.761 (15,6× o texto do experimento principal) |
+| Símbolos distintos | 49 |
+| Entropia H(X) | 4,1035 bits/símbolo |
+
+### 13.2 Compressão Huffman
+
+| Métrica | Valor |
+|---|---|
+| Comprimento médio do código | 4,1425 bits/símbolo |
+| Eficiência (H/L) | 99,06% |
+| Bits úteis | 15.580 |
+| Bytes | 1.948 |
+| Razão de compressão | **51,8%** |
+| Comprimentos de código | 3 a 12 bits |
+
+O comportamento é praticamente idêntico ao texto curto: razão ~52%, eficiência ~99% em relação ao limite de Shannon. Esperado: Huffman opera símbolo a símbolo, e o desempenho depende apenas da distribuição de frequências, não do tamanho do texto.
+
+### 13.3 Compressão LZ78
+
+| Métrica | Valor |
+|---|---|
+| Tokens gerados | 1.075 |
+| Entradas no dicionário | 1.074 |
+| Tamanho médio das entradas | 3,50 chars |
+| Maior entrada | 10 chars |
+| Bits totais | 25.800 |
+| Bytes | 3.225 |
+| Razão de compressão | **85,7%** |
+
+Desta vez o LZ78 **comprime**. O motivo está na composição do dicionário: as entradas têm em média 3,5 caracteres (vs 1,98 no texto curto) e a maior tem 10 caracteres. As entradas mais longas capturam fragmentos repetidos do texto:
+
+```
+(10) 'odificacao'      radical de 'codificacao'
+(10) 'icacao de '      sufixo compartilhado por codificacao de fonte/canal
+ (9) 'acao de c'       variante
+ (9) ' A codifi'       inicio de frases repetidas
+ (9) 'cacao de '       variante
+```
+
+Cada referência a uma dessas entradas substitui 3-10 caracteres (24-80 bits no ASCII original) por um único token de 24 bits, gerando compressão real.
+
+### 13.4 Comparação direta
+
+| Texto                | Chars | Huffman | LZ78 |
+|----------------------|-------|---------|------|
+| Curto (Shannon)      | 241   | 54,4%   | 151,9% (expandiu) |
+| Longo (redundante)   | 3.761 | 51,8%   | **85,7%** (comprime) |
+
+O Huffman é praticamente insensível ao tamanho do texto — sua eficiência depende só da distribuição estatística dos símbolos. O LZ78, ao contrário, é fortemente dependente do volume e da redundância: precisa de tempo para o dicionário acumular entradas longas que justifiquem o overhead de 16 bits do índice. Esta é a razão pela qual LZ78 e seus descendentes (LZW, gzip, deflate, zstd) brilham em arquivos grandes e penalizam arquivos pequenos.
+
+## 14. Arquivos
 
 - [`huffman_lz78_codificacao.ipynb`](huffman_lz78_codificacao.ipynb) — implementação completa
 - [`texto_original.txt`](texto_original.txt) — texto-fonte
