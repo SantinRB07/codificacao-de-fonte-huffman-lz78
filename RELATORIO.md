@@ -211,56 +211,65 @@ Estes marcadores não corrigem nada; apenas tornam o erro visível para análise
 
 > Em 1948, Claude Shannon publicou um artigo que media a surpresa em bits. Antes dele, a informacao era vaga; **dei.at** dele, virou grandeza. Provou que toda mensagem tem um limite minimo de compressao, e que abaixo dele nada sobrevive ao ruido.
 
-A palavra `depois` foi substituída por `dei.at` — 4 caracteres alterados, dano localizado em uma única posição do texto. O resto da mensagem foi reconstruído sem erro, com tamanho idêntico ao original (241 caracteres).
+A palavra `depois` foi substituída por `dei.at` — 4 caracteres alterados em posições contíguas (110–113), dano localizado em uma única região. O resto da mensagem foi reconstruído sem erro, com tamanho idêntico ao original (241 caracteres).
 
 **LZ78:**
 
-> Em 1948, Claude Shannon publicou um artigo que media a surpresa em bits. Antes dele, a informacao era **vp^[ERR:32779]**; depois dele, virou grandeza. Provou que toda **mensp^em** tem um limite minimo de compressao, e que abaixo dele nada sobrevive ao ruido.
+> Em 1948, Claude Shannon publicou um artigo que media a surpresa em bits. Antes dele, a informacao era v**p^[ERR:32779]**; depois dele, virou grandeza. Provou que toda mens**p^**em tem um limite minimo de compressao, e que abaixo dele nada sobrevive ao ruido.
 
-A palavra `vaga` foi corrompida em duas regiões: no ponto do erro (`vp^[ERR:32779]`) e, posteriormente, em `mensagem → mensp^em`. O texto decodificado tem 251 caracteres (10 a mais que o original, por causa dos marcadores e da substring corrompida).
+O texto decodificado tem 251 caracteres (10 a mais que o original) por causa da inserção do marcador `[ERR:32779]`. Há **duas regiões corrompidas**, separadas por um bloco intacto de 51 caracteres no meio:
+
+- **1ª corrupção (no ponto do erro):** `aga` virou `p^[ERR:32779]`. Aqui o token #63 teve seu índice flipado para 32.779 (fora do dicionário de 62 entradas àquela altura), e o decoder marcou explicitamente.
+- **2ª corrupção (envenenamento de dicionário):** `ag` em "mensagem" virou `p^`. Esse trecho viria de uma entrada do dicionário que, na decodificação, ficou armazenada com a versão corrompida — a corrupção do token #63 propagou para uma referência posterior.
 
 ### 10.3 Métricas de impacto
 
-| Esquema | Bits flipados | Chars afetados | % do texto | Propagação    |
-|---------|---------------|----------------|------------|----------------|
-| Huffman | 10            | 4 / 241        | 1,7%       | 0,4 chars/bit  |
-| LZ78    | 9             | 135 / 241      | 56,0%      | 15,0 chars/bit |
+| Esquema | Bits flipados | Chars do original modificados | Chars preservados | Caracteres adicionais |
+|---------|---------------|-------------------------------|-------------------|------------------------|
+| Huffman | 10            | 4 / 241 (1,7%)                | 237 / 241 (98,3%) | 0                      |
+| LZ78    | 9             | 5 / 241 (2,1%)                | 236 / 241 (97,9%) | +10 (marcador `[ERR:idx]`) |
 
-A propagação por bit é a métrica mais reveladora: cada bit flipado no LZ78 afetou, em média, 15 caracteres do texto reconstruído. No Huffman, cada bit flipado afetou menos de meio caractere.
+A métrica usada aqui é o número de chars do texto original que foram efetivamente modificados, alinhando o original e o decodificado por prefixo/sufixo comuns. Comparações posição a posição superestimam o dano quando há inserção (como o marcador do LZ78), porque todo o sufixo fica deslocado e contado como "diferente" mesmo sendo idêntico.
+
+A integridade efetiva dos dois esquemas neste experimento foi **bastante próxima**: ambos preservaram acima de 97,9% do texto original. A diferença qualitativa é outra: o Huffman concentrou todo o seu dano em uma região contígua, enquanto o LZ78 espalhou em duas regiões separadas, evidenciando o efeito de envenenamento de dicionário (a segunda corrupção está a ~54 caracteres da primeira).
 
 ## 11. Análise técnica
 
-A literatura sobre robustez de codificação de fonte frequentemente caracteriza Huffman como "catastrófico" e LZ78 como "mais robusto" sob erros de canal. O experimento mostra o oposto, e o porquê desse resultado vale a discussão.
+Ambos os esquemas preservaram a quase totalidade do texto sob a rajada de erros aplicada — 98,3% no Huffman, 97,9% no LZ78. Apesar dos números próximos, o **padrão estrutural** do dano em cada esquema foi diferente, e essa diferença é a parte mais informativa do experimento.
 
 ### 11.1 Re-sincronização em códigos prefix-free
 
-Códigos de Huffman têm a propriedade de **re-sincronização espontânea**: dado um bitstream arbitrário, o decoder eventualmente cai em uma folha da árvore e reinicia a leitura. Mesmo após um deslocamento de fase causado por bit flips, é estatisticamente comum que o decoder volte a alinhar-se com o bitstream original alguns símbolos adiante. Para esta fonte, isso aconteceu rapidamente: a rajada de 10 bits errados perturbou a decodificação de apenas três códigos consecutivos (uma palavra do texto), e o decoder retomou o alinhamento correto a partir do próximo símbolo.
+Códigos de Huffman têm a propriedade de **re-sincronização espontânea**: dado um bitstream arbitrário, o decoder eventualmente cai em uma folha da árvore e reinicia a leitura. Mesmo após um deslocamento de fase causado por bit flips, é estatisticamente comum que o decoder volte a alinhar-se com o bitstream original alguns símbolos adiante. Para esta fonte, isso aconteceu rapidamente: a rajada de 10 bits errados perturbou a decodificação de exatamente quatro caracteres consecutivos (a palavra `depois` virou `dei.at`), e o decoder retomou o alinhamento correto a partir do próximo símbolo. Não houve nenhum efeito além dessa janela.
 
-Esta resiliência depende criticamente do **padrão temporal do erro**. Bit flips esparsos forçariam dessincronizações repetidas, e o decoder gastaria mais bits para re-sincronizar a cada flip, potencialmente corrompendo grandes regiões do texto. Rajadas concentradas, paradoxalmente, são tratadas com mais facilidade.
+Esta resiliência depende do **padrão temporal do erro**. Bit flips esparsos forçariam dessincronizações repetidas, e o decoder gastaria mais bits para re-sincronizar a cada flip, potencialmente corrompendo regiões maiores do texto. Rajadas concentradas são tratadas com mais facilidade, porque cada flip extra dentro da mesma janela tende a desperdiçar bits que já estavam corrompidos.
 
 ### 11.2 Envenenamento do dicionário em LZ78
 
 LZ78 tem uma estrutura de tokens com largura fixa, o que em princípio limita o dano de um bit flip ao token onde ele cai. Esse é o argumento usual a favor de sua robustez. No entanto, **se o erro atingir o campo de índice (16 bits) e o índice resultante for diferente do original**, dois casos se apresentam:
 
-1. O novo índice está fora do dicionário (acima do número de entradas atuais). O decoder detecta a anomalia e marca `[ERR:idx]`. Esse foi o caso do token #63 neste experimento: o índice corrompido tornou-se 32779, muito acima das 62 entradas existentes àquela altura.
+1. O novo índice está fora do dicionário (acima do número de entradas atuais). O decoder detecta a anomalia e marca `[ERR:idx]`. Esse foi o caso do token #63 neste experimento: o índice corrompido tornou-se 32.779, muito acima das 62 entradas existentes àquela altura.
 2. O novo índice está dentro do dicionário, mas referencia uma entrada diferente da original. O decoder emite silenciosamente uma substring errada, sem nenhuma indicação.
 
-Em ambos os casos, há um efeito secundário grave: a entrada corrompida é inserida no dicionário com o próximo índice disponível. Qualquer token posterior que referencie essa entrada propagará a corrupção. Foi o que aconteceu com `mensagem → mensp^em`: o pedaço `agem` viria do dicionário, mas o decoder agora tem uma versão envenenada da entrada correspondente.
+Em ambos os casos, há um efeito secundário: a entrada corrompida é inserida no dicionário do decoder com o próximo índice disponível. Qualquer token posterior que referencie essa entrada propagará a corrupção. Foi o que aconteceu com `mensagem → mensp^em`: o sufixo `ag` viria de uma entrada do dicionário envenenada lá atrás, e o decoder a copiou como `p^`.
 
-### 11.3 Reversão do estereótipo
+A propagação, neste experimento, foi limitada — apenas 2 caracteres adicionais foram corrompidos por causa do envenenamento. Mas o fenômeno é qualitativamente diferente do Huffman: enquanto o dano no Huffman fica geograficamente contido na vizinhança do bit flipado, no LZ78 ele pode **reaparecer em pontos distantes** do texto, dependendo de quais entradas envenenadas são referenciadas pelos tokens subsequentes.
 
-A combinação dos dois fenômenos explica os resultados observados:
+### 11.3 Comparação dos padrões de dano
 
-- A rajada concentrada favoreceu o Huffman, que pôde absorvê-la em uma única região e re-sincronizar.
-- A mesma rajada atingiu o LZ78 no pior lugar possível — campo de índice — e produziu envenenamento de longo alcance.
+| Aspecto                         | Huffman                       | LZ78                                       |
+|----------------------------------|--------------------------------|---------------------------------------------|
+| Chars do original modificados   | 4                              | 5 (3 no ponto + 2 por propagação)           |
+| Localização do dano             | 1 região contígua              | 2 regiões separadas por 54 chars intactos   |
+| Mecanismo de propagação         | Nenhum (re-sincroniza)         | Envenenamento do dicionário                  |
+| Detectabilidade do erro         | Indireta (texto sem sentido)   | Direta (marcador `[ERR:idx]` no 1º ponto)   |
 
-Se o cenário fosse outro — bit flips dispersos pelo arquivo, ou flips concentrados no campo de caractere do LZ78 — o resultado teria sido o oposto. **A robustez efetiva de cada esquema não é uma propriedade do esquema em si**, mas da interação entre a estrutura do codificador e a estatística do erro.
+Não há um "vencedor" claro neste experimento — ambos os esquemas se mostraram resilientes a uma rajada concentrada de erros na metade do bitstream. O que o experimento mostra é que **a estrutura do dano reflete a estrutura do codificador**: Huffman produz dano local e visualmente identificável (palavra sem sentido); LZ78 produz dano potencialmente disperso, com pontos de corrupção remota via dicionário, mas com a vantagem de oferecer um sinal de detecção quando o índice corrompido cai fora do dicionário.
 
 ## 12. Conclusões
 
 1. **Eficiência de compressão.** Huffman atingiu 99,12% do limite de Shannon para esta fonte, comprimindo o arquivo em 45,6% do tamanho original. LZ78 expandiu o arquivo em 52% — comportamento esperado para textos curtos, onde o overhead de 16 bits por token não é compensado pela construção lenta do dicionário.
 
-2. **Robustez a erros.** O resultado depende fortemente da distribuição espacial e estrutural dos erros. Neste experimento, a rajada concentrada produziu 4 chars de dano em Huffman (0,4 chars/bit) versus 135 chars em LZ78 (15 chars/bit), um fator de quase 40× pior para o LZ78. A causa raiz é o envenenamento de dicionário quando o erro atinge o campo de índice.
+2. **Robustez a erros.** Ambos os esquemas preservaram acima de 97,9% do texto original sob a rajada de erros aplicada (Huffman 98,3%, LZ78 97,9%). A diferença é qualitativa, não quantitativa: o Huffman concentrou todo o seu dano em uma única região (4 chars contíguos), enquanto o LZ78 produziu duas regiões separadas (3 chars no ponto do erro + 2 chars depois, por envenenamento do dicionário). Em padrões de erro diferentes — bit flips dispersos, ou flips no campo de caractere do LZ78 — os resultados poderiam ser bem distintos.
 
 3. **Implicação prática.** Codificação de fonte, isoladamente, não é robusta a canal ruidoso. Sistemas reais combinam codificação de fonte com codificação de canal (Hamming, Reed-Solomon, LDPC, etc.) que adiciona redundância calibrada para detecção e correção de erros. É o princípio da separação fonte-canal de Shannon: comprimir e proteger são duas camadas independentes, cada uma com seu próprio papel.
 
